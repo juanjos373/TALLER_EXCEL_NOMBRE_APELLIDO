@@ -1,19 +1,60 @@
-import openpyxl
-from tabulate import tabulate
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+from pathlib import Path
+
+try:
+    import openpyxl
+    from tabulate import tabulate
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+except ImportError as e:
+    print(f"Error: {e}. Asegúrese de tener instaladas las librerías necesarias: openpyxl, tabulate, reportlab.")
+    exit(1)
+
+BASE_DIR = Path(__file__).resolve().parent
+ARCHIVO_EXCEL = BASE_DIR / "ventas_tecnologia_v2.xlsx"
+ARCHIVO_PDF = BASE_DIR / "reporte_ejecutivo_ventas.pdf"
+
+
+def crear_archivo_excel_default(ruta_excel: Path) -> Path:
+    if ruta_excel.exists():
+        return ruta_excel
+
+    libro = openpyxl.Workbook()
+    hoja = libro.active
+    hoja.title = "Ventas"
+    hoja.append(["ID", "Producto", "Categoría", "Precio ($)", "Ventas (Unid)"])
+
+    datos_base = [
+        [1, "Laptop Pro 14", "Computación", 1299.99, 42],
+        [2, "Monitor 27\"", "Periféricos", 349.50, 80],
+        [3, "Teclado Mecánico", "Accesorios", 89.99, 120],
+        [4, "Auriculares Wireless", "Audio", 199.00, 65],
+        [5, "Smartphone X", "Celulares", 899.00, 58],
+        [6, "Disco SSD 1TB", "Almacenamiento", 129.00, 140],
+        [7, "Cámara 4K", "Fotografía", 699.99, 33],
+        [8, "Impresora Multifuncional", "Oficina", 249.99, 77],
+        [9, "Tablet Pro", "Tablets", 459.00, 52],
+        [10, "Router Wi-Fi 6", "Redes", 159.00, 95],
+    ]
+
+    for fila in datos_base:
+        hoja.append(fila)
+
+    libro.save(ruta_excel)
+    return ruta_excel
+
 
 # 1. Cargar el archivo Excel
-wb = openpyxl.load_workbook("ventas_tecnologia_v2.xlsx", data_only=True)
+crear_archivo_excel_default(ARCHIVO_EXCEL)
+wb = openpyxl.load_workbook(ARCHIVO_EXCEL, data_only=True)
 hoja = wb.active
 
 # 2. Leer datos dinámicamente
 datos = []
-
 for fila in hoja.iter_rows(min_row=2, values_only=True):
-    datos.append(list(fila))
+    if fila and any(valor is not None for valor in fila):
+        datos.append(list(fila))
 
 # 3. Mostrar en consola con tabulate
 encabezados = ["ID", "Producto", "Categoría", "Precio ($)", "Ventas (Unid)"]
@@ -29,20 +70,43 @@ def mostrar_tabla(datos_a_mostrar, encabezados_actuales):
 
 
 def filtrar_por_precio(datos_a_filtrar, precio_minimo=100):
-    return [fila for fila in datos_a_filtrar if float(fila[3]) > precio_minimo]
+    resultado = []
+    for fila in datos_a_filtrar:
+        try:
+            precio = float(fila[3] or 0)
+        except (TypeError, ValueError, IndexError):
+            continue
+        if precio > precio_minimo:
+            resultado.append(fila)
+    return resultado
 
 
 def calcular_metricas(datos_a_calcular):
-    total_unidades = sum(int(fila[4]) for fila in datos_a_calcular)
-    precio_promedio = sum(float(fila[3]) for fila in datos_a_calcular) / len(datos_a_calcular) if datos_a_calcular else 0
+    total_unidades = sum(int(fila[4] or 0) for fila in datos_a_calcular)
+    precio_promedio = sum(float(fila[3] or 0) for fila in datos_a_calcular) / len(datos_a_calcular) if datos_a_calcular else 0
     return total_unidades, precio_promedio
 
 
 def buscar_por_id(datos_a_buscar, id_buscar):
-    return [fila for fila in datos_a_buscar if int(fila[0]) == id_buscar]
+    resultado = []
+    for fila in datos_a_buscar:
+        try:
+            if int(fila[0]) == id_buscar:
+                resultado.append(fila)
+        except (TypeError, ValueError, IndexError):
+            continue
+    return resultado
 
 
 def generar_pdf(nombre_archivo, datos_a_exportar, encabezados_actuales):
+    ruta_pdf = Path(nombre_archivo)
+    if ruta_pdf.exists():
+        try:
+            ruta_pdf.unlink()
+        except PermissionError:
+            print(f"Advertencia: no se pudo sobrescribir '{ruta_pdf.name}'. Cierre el archivo PDF y vuelva a intentarlo.")
+            return
+
     styles = getSampleStyleSheet()
     estilo_titulo = ParagraphStyle('EstiloTitulo', parent=styles['Title'], fontName='Helvetica-Bold', fontSize=18, textColor=colors.HexColor("#1A365D"), spaceAfter=10)
     estilo_cuerpo = ParagraphStyle('EstiloCuerpo', parent=styles['Normal'], fontSize=9)
@@ -65,7 +129,7 @@ def generar_pdf(nombre_archivo, datos_a_exportar, encabezados_actuales):
             Paragraph(str(r[0]), ParagraphStyle('C', parent=estilo_cuerpo, alignment=1)),
             Paragraph(str(r[1]), ParagraphStyle('L', parent=estilo_cuerpo, alignment=0)),
             Paragraph(str(r[2]), ParagraphStyle('C', parent=estilo_cuerpo, alignment=1)),
-            Paragraph(f"${r[3]:,.2f}", ParagraphStyle('R', parent=estilo_cuerpo, alignment=2)),
+            Paragraph(f"${float(r[3]):,.2f}", ParagraphStyle('R', parent=estilo_cuerpo, alignment=2)),
             Paragraph(str(r[4]), ParagraphStyle('R', parent=estilo_cuerpo, alignment=2))
         ]
         for r in datos_a_exportar
@@ -92,7 +156,7 @@ def generar_pdf(nombre_archivo, datos_a_exportar, encabezados_actuales):
 
     story.append(tabla_pdf)
 
-    doc = SimpleDocTemplate(nombre_archivo, pagesize=letter)
+    doc = SimpleDocTemplate(str(nombre_archivo), pagesize=letter)
     doc.build(story)
 
 
@@ -130,8 +194,8 @@ def menu():
                 print(f"Advertencia: no se encontró el ID {id_buscar}.")
 
         elif opcion == "4":
-            generar_pdf("reporte_ejecutivo_ventas.pdf", datos, encabezados)
-            print("[ÉXITO] Archivo 'reporte_ejecutivo_ventas.pdf' generado correctamente.")
+            generar_pdf(ARCHIVO_PDF, datos, encabezados)
+            print(f"[ÉXITO] Archivo '{ARCHIVO_PDF.name}' generado correctamente.")
 
         elif opcion == "5":
             print("Saliendo del programa...")
@@ -141,5 +205,5 @@ def menu():
             print("Opción no válida. Intente nuevamente.")
 
 
-# Ejecutar menú principal
-menu()
+if __name__ == "__main__":
+    menu()
